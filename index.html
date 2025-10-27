@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sangam Mahara (Kushal) - Developer & Artist</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase functions to the window object for use in the main script block
+        window.firebase = {
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, 
+            getFirestore, doc, setDoc, onSnapshot, collection, query, setLogLevel
+        };
+    </script>
+    <style>
+        /* Base Colors & Typography */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0c0d12; /* Darker Slate/Black */
+            color: #e5e7eb; /* Default Text Color (Gray 200) */
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        /* Premium Card & Visuals */
+        .card {
+            /* Deeper gradient for premium feel */
+            background: linear-gradient(135deg, #1f2937, #111827); /* From Slate 800 to Slate 900 */
+            border: 1px solid #475569; /* Slate 600 border */
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            /* Stronger 3D shadow */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+        }
+        .card:hover {
+            transform: translateY(-8px); /* Deeper lift */
+            /* Intense subtle glow effect on hover using Sky Blue */
+            box-shadow: 0 20px 40px -8px rgba(56, 189, 248, 0.3), 0 0 0 1px rgba(56, 189, 248, 0.1);
+            border-color: #3b82f6; /* Blue accent on hover */
+        }
+
+        /* Accent Elements - Using Sky Blue (38bdf8) */
+        .accent-text {
+            color: #38bdf8; /* Sky 400 Accent */
+        }
+        .section-heading {
+            border-left: 4px solid #38bdf8; 
+            padding-left: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em; /* Tighter letter spacing */
+            font-weight: 700;
+        }
+        .active-tab {
+            background-color: #38bdf8;
+            color: #0c0d12;
+            font-weight: 800;
+            box-shadow: 0 0 20px #38bdf890; 
+        }
+        .status-bar-bg {
+            background-color: #111827; /* Darker header for premium contrast */
+        }
+
+        /* Editable Content */
+        .editable-text[contenteditable="true"] {
+            outline: 3px dashed #fcd34d; /* Amber 300 highlight */
+            padding: 4px;
+            margin: -4px;
+            border-radius: 6px;
+            background-color: #1f2a3a; 
+            min-height: 1.5em;
+            transition: background-color 0.2s;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Standalone JavaScript Logic -->
+    <script>
+        // Set Firebase logging level (optional, but good for debugging)
+        if (typeof firebase !== 'undefined' && firebase.setLogLevel) {
+            firebase.setLogLevel('debug');
+        }
+
+        let isEditMode = false;
+        let db = null;
+        let auth = null;
+        let profileRef = null;
+        let userId = null; // Will store the authenticated user ID
+        const PROFILE_DOC_PATH = "user_profile";
+        
+        // --- SECURITY NOTE: HASHED PASSWORD ---
+        // This is the secure SHA-256 hash of the password 'hunterx54321@#'.
+        const EDIT_PASSWORD_HASH = "533a1e2613d969239845341490226317b2b404d550e7a173873327685603c626";
+
+        // --- 1. Default Profile Data (Used as fallback/initial structure) ---
+        let PROFILE_DATA = {
+            name: "Sangam Mahara",
+            preferredName: "Kushal",
+            age: "17 years old (Aquarius ♒)",
+            dateOfBirth: "January 23, 2007",
+            placeOfBirth: "Dhankuta, Jitpur, Nepal",
+            location: "Nepal, Morang, Dulari",
+            title: "Grade 12 Science (Computer Science) | Developer & Portrait Artist",
+            bio: "I am Sangam Mahara (Kushal), a 17-year-old Grade 12 student in Nepal, focused on the intersection of science and technology. Born under the Aquarius sign, I blend my scientific discipline with the creativity of pencil sketching and the drive of calisthenics. My time is dedicated to mastering complex science subjects while passionately exploring computer programming.",
+            devPhilosophy: "My core development philosophy centers on **efficiency and human-centric design**. I believe code should be clean, scalable, and directly solve a real-world problem. I prioritize learning foundational languages like C++ for performance and Python for rapid prototyping and data science.",
+            artisticVision: "My artistic vision is driven by capturing emotion and detail in graphite and charcoal. I seek realism and high contrast in my portraits, focusing on how light shapes form. Art provides a necessary creative counterpoint to my scientific studies.",
+            hobbies: ["Drawing & sketching", "Playing chess", "Playing Video Games", "Intermediate calisthenics"],
+            skills: ["Python", "C++", "HTML", "Computer Science", "Biology", "Chemistry", "Mathematics", "Pencil Sketching", "Short Runner", "High Jumper"],
+            education: [
+                { level: "+2 Science (Current)", institution: "Edutek College", status: "NEB Curriculum", link: "https://www.facebook.com/i.edutekcollege" },
+                { level: "10th Grade (Passed Out)", institution: "Purwanchal Academy", status: "NEB Curriculum", link: "https://www.facebook.com/Purwanchal98" }
+            ],
+            image_url: "https://placehold.co/128x128/38bdf8/0c0d12?text=K+M",
+            art_gallery: [
+                "https://placehold.co/400x300/1e293b/38bdf8?text=Portrait+Sketch+1",
+                "https://placehold.co/400x300/1e293b/38bdf8?text=Art+Example+2",
+                "https://placehold.co/400x300/1e293b/38bdf8?text=Art+Example+3",
+            ],
+            links: [
+                { name: "Email (kushalmohora)", url: "mailto:kushalmohora@gmail.com", icon: "📧" },
+                { name: "Instagram (kushal__vrst)", url: "https://www.instagram.com/kushal__vrst", icon: "📸" },
+                { name: "College FB Page", url: "https://www.facebook.com/i.edutekcollege", icon: "🎓" },
+                { name: "School FB Page", url: "https://www.facebook.com/Purwanchal98", icon: "🏫" },
+                { name: "GitHub/Work", url: "[YOUR_GITHUB_URL_HERE]", icon: "💻" }
+            ]
+        };
+        
+        // --- 2. Hashing Utility for Password Security ---
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }
+
+        // --- 3. Firebase Initialization and Data Loading ---
+
+        window.onload = function() {
+            if (typeof firebase === 'undefined') {
+                console.error("Firebase library not loaded.");
+                updateStatus('Error: Firebase SDK not found.', 'text-red-500');
+                renderProfile(PROFILE_DATA);
+                showPage('home-page');
+                return;
+            }
+            initializeFirebase();
+        };
+
+        async function initializeFirebase() {
+            try {
+                // Global variables are provided by the canvas environment
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+                if (Object.keys(firebaseConfig).length === 0) {
+                    throw new Error("Firebase configuration missing.");
+                }
+
+                const app = firebase.initializeApp(firebaseConfig);
+                db = firebase.getFirestore(app);
+                auth = firebase.getAuth(app);
+                
+                // Define the public path for profile data
+                const profilePath = `/artifacts/${appId}/public/data/profile`;
+                profileRef = firebase.doc(db, profilePath, PROFILE_DOC_PATH);
+                
+                updateStatus('Authenticating...', 'text-yellow-400');
+
+                // Sign in using the custom token or anonymously
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await firebase.signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await firebase.signInAnonymously(auth);
+                }
+                
+                // Get the user ID after sign-in
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+
+                // Start listening for profile data changes
+                loadProfileData();
+
+            } catch (error) {
+                console.error("Firebase Init Error:", error);
+                updateStatus('Error: Failed to connect to database.', 'text-red-500');
+                // Render default data if DB fails
+                renderProfile(PROFILE_DATA);
+                showPage('home-page'); 
+            }
+        }
+        
+        function loadProfileData() {
+            updateStatus('Loading profile data...', 'text-sky-400');
+            
+            firebase.onSnapshot(profileRef, (docSnapshot) => {
+                let dataChanged = false;
+                if (docSnapshot.exists()) {
+                    // Update global data object with saved data
+                    PROFILE_DATA = { ...PROFILE_DATA, ...docSnapshot.data() };
+                    updateStatus('Profile loaded and connected to database.', 'text-green-500');
+                    dataChanged = true;
+                } else {
+                    // If no data exists, save the default structure
+                    saveProfileData(PROFILE_DATA, true); 
+                    updateStatus('Using default profile. Ready to edit.', 'text-amber-500');
+                    dataChanged = true;
+                }
+                
+                // Only re-render if data was actually loaded/initialized
+                if (dataChanged) {
+                    renderProfile(PROFILE_DATA);
+                    // Ensure a tab is shown on load
+                    if (!document.querySelector('.content-page:not(.hidden)')) {
+                        showPage('home-page');
+                    }
+                }
+            }, (error) => {
+                console.error("Firestore Snapshot Error:", error);
+                updateStatus('Error loading profile. Check console.', 'text-red-500');
+                renderProfile(PROFILE_DATA);
+                showPage('home-page');
+            });
+        }
+        
+        async function saveProfileData(dataToSave, isInitial = false) {
+            if (!db || !profileRef) return;
+            try {
+                updateStatus(isInitial ? 'Saving initial profile...' : 'Saving changes...', 'text-yellow-400');
+                // We use setDoc without merge to overwrite the entire document with the new structure
+                await firebase.setDoc(profileRef, dataToSave); 
+                updateStatus('Changes saved permanently.', 'text-green-500');
+            } catch (error) {
+                console.error("Firestore Save Error:", error);
+                updateStatus('ERROR: Could not save changes.', 'text-red-500');
+            }
+        }
+
+        // --- 4. UI Rendering and Utilities ---
+
+        function updateStatus(message, classes) {
+            const statusEl = document.getElementById('status-indicator');
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.className = `text-xs font-semibold transition-colors tracking-wider ${classes}`;
+            }
+        }
+
+        const setText = (id, content) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = content || `[Edit: ${id} missing data]`;
+        };
+        
+        const setEditable = (className, state) => {
+            document.querySelectorAll(`.${className}`).forEach(el => {
+                // Ensure the contenteditable attribute is set/removed
+                el.contentEditable = state ? 'true' : 'false';
+                if (state) {
+                    el.classList.add('editable-text');
+                } else {
+                    el.classList.remove('editable-text');
+                }
+            });
+        };
+
+        const arrayToDisplay = (arr) => {
+            // Converts array to a comma-separated string for CMS input fields
+            return Array.isArray(arr) ? arr.join(', ') : '';
+        }
+
+        const displayToArray = (str) => {
+             // Converts CMS input string back into a clean array
+             return str.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        }
+        
+        window.showPage = function(pageId) {
+            const pages = document.querySelectorAll('.content-page');
+            pages.forEach(page => {
+                page.classList.add('hidden');
+            });
+            document.getElementById(pageId).classList.remove('hidden');
+
+            const tabs = document.querySelectorAll('.nav-tab');
+            tabs.forEach(tab => {
+                tab.classList.remove('active-tab');
+                tab.classList.add('hover:bg-slate-700/50', 'text-gray-300');
+            });
+            document.getElementById(`tab-${pageId}`).classList.add('active-tab');
+            document.getElementById(`tab-${pageId}`).classList.remove('hover:bg-slate-700/50', 'text-gray-300');
+        }
+
+        function renderProfile(data) {
+            // HERO & TEXT FIELDS
+            setText('profile-name', data.name);
+            setText('profile-title', data.title);
+            setText('bio-summary', data.bio);
+            setText('dev-philosophy', data.devPhilosophy);
+            setText('artistic-vision', data.artisticVision);
+            setText('stat-age', data.age);
+            setText('stat-location', data.location);
+            setText('stat-dob', data.dateOfBirth);
+            setText('stat-birthplace', data.placeOfBirth);
+
+            // Profile Image
+            const profileImg = document.getElementById('profile-image');
+            profileImg.src = data.image_url;
+            
+            // Set CMS input fields only when in edit mode (or initially for state)
+            if (isEditMode) {
+                 document.getElementById('edit-image-url').value = data.image_url;
+                 document.getElementById('edit-skills-input').value = arrayToDisplay(data.skills);
+                 document.getElementById('edit-hobbies-input').value = arrayToDisplay(data.hobbies);
+                 document.getElementById('edit-gallery-input').value = arrayToDisplay(data.art_gallery);
+            }
+
+            // SECTIONS WITH ARRAYS
+            renderTags('skills-container', data.skills, 'bg-blue-600/30 text-blue-300 hover:bg-blue-700/40');
+            renderTags('hobbies-container', data.hobbies, 'bg-sky-600/30 text-sky-300 hover:bg-sky-700/40');
+            renderEducation(data.education);
+            renderGallery(data.art_gallery);
+            renderLinks(data.links);
+        }
+
+        function renderTags(containerId, tags, classes) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = tags.map(tag => 
+                `<span class="skill-tag text-sm font-medium px-4 py-1 rounded-full shadow-md ${classes} whitespace-nowrap transition transform hover:scale-105">${tag}</span>`
+            ).join('');
+        }
+        
+        function renderEducation(education) {
+            const container = document.getElementById('education-container');
+            if (!container) return;
+            container.innerHTML = education.map(edu => `
+                <div class="p-5 rounded-xl bg-slate-800/50 flex flex-col md:flex-row justify-between items-start md:items-center card border-l-4 border-sky-500 hover:border-blue-400">
+                    <div>
+                        <p class="text-xl font-bold accent-text">${edu.institution}</p>
+                        <p class="text-sm text-gray-400">${edu.level}</p>
+                        <p class="text-xs text-gray-500">${edu.status}</p>
+                    </div>
+                    ${edu.link ? 
+                        `<a href="${edu.link}" target="_blank" rel="noopener noreferrer" class="mt-3 md:mt-0 px-4 py-2 bg-sky-600/40 rounded-full text-sm font-semibold text-sky-200 hover:bg-sky-600 transition shadow-lg">Visit Site 🔗</a>` :
+                        `<span class="text-sm text-gray-500 mt-3 md:mt-0">No Link</span>`
+                    }
+                </div>
+            `).join('');
+        }
+
+        function renderGallery(galleryUrls) {
+            const container = document.getElementById('gallery-container');
+            if (!container) return;
+            // Clear existing content
+            container.innerHTML = ''; 
+            
+            if (Array.isArray(galleryUrls) && galleryUrls.length > 0) {
+                container.innerHTML = galleryUrls.map(url => `
+                    <div class="aspect-w-4 aspect-h-3 overflow-hidden rounded-xl shadow-2xl card border-none">
+                        <img src="${url}" 
+                             alt="Personal Art Sketch" 
+                             class="object-cover w-full h-full transition duration-500 transform hover:scale-110"
+                             onerror="this.onerror=null; this.src='https://placehold.co/400x300/111827/ef4444?text=IMAGE+ERROR'">
+                    </div>
+                `).join('');
+            } else {
+                 container.innerHTML = '<p class="text-gray-500 italic md:col-span-3">No art pieces added yet. Use the CMS panel in Edit Mode to add photo URLs.</p>';
+            }
+        }
+        
+        function renderLinks(links) {
+            const container = document.getElementById('contact-links');
+            if (!container) return;
+            container.innerHTML = links.map(link => `
+                <a href="${link.url}" target="_blank" rel="noopener noreferrer" 
+                   class="w-full py-4 bg-slate-800/50 rounded-lg text-center font-bold accent-text hover:bg-slate-700 transition flex items-center justify-center space-x-3 shadow-xl transform hover:scale-[1.02]">
+                    <span class="text-xl">${link.icon}</span>
+                    <span>${link.name}</span>
+                </a>
+            `).join('');
+        }
+
+        // --- 5. Edit Mode Logic with Password Check and Persistence ---
+
+        window.toggleEditMode = async function() {
+            const toggleButton = document.getElementById('edit-mode-toggle');
+            const cmsPanel = document.getElementById('cms-edit-panel');
+            
+            if (isEditMode) {
+                // Exiting edit mode
+                isEditMode = false;
+                toggleButton.textContent = 'Enable Edit Mode';
+                toggleButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                toggleButton.classList.add('bg-gray-600', 'hover:bg-gray-700');
+                cmsPanel.classList.add('hidden');
+                setEditable('editable-text', false);
+                updateStatus('Profile loaded and connected to database.', 'text-green-500');
+            } else {
+                // Entering edit mode - requires password
+                const userPassword = prompt("Enter Edit Mode Password:");
+                if (!userPassword) return; // User cancelled
+                
+                try {
+                    const hashedInput = await sha256(userPassword);
+
+                    if (hashedInput === EDIT_PASSWORD_HASH) {
+                        isEditMode = true;
+                        
+                        // *** DIAGNOSTIC LOG: This confirms successful authentication ***
+                        console.log("Authentication Successful. Entering Edit Mode.");
+                        
+                        // Populate CMS fields with current data
+                        document.getElementById('edit-image-url').value = PROFILE_DATA.image_url || '';
+                        document.getElementById('edit-skills-input').value = arrayToDisplay(PROFILE_DATA.skills);
+                        document.getElementById('edit-hobbies-input').value = arrayToDisplay(PROFILE_DATA.hobbies);
+                        document.getElementById('edit-gallery-input').value = arrayToDisplay(PROFILE_DATA.art_gallery);
+
+                        toggleButton.textContent = 'Exit Edit Mode';
+                        toggleButton.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                        toggleButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                        
+                        // --- CRITICAL FIX: Ensure panel visibility is removed ---
+                        cmsPanel.classList.remove('hidden'); 
+                        
+                        setEditable('editable-text', true);
+                        updateStatus('EDIT MODE ACTIVE. Changes will be saved permanently.', 'text-amber-400');
+                        // Re-render to show editable outlines and populated CMS fields
+                        renderProfile(PROFILE_DATA); 
+                    } else {
+                        // Display error message
+                        updateStatus('Authentication failed. Incorrect password.', 'text-red-500');
+                        setTimeout(() => updateStatus('Profile loaded and connected to database.', 'text-green-500'), 3000);
+                    }
+                } catch (error) {
+                    console.error("Password Hashing Error:", error);
+                    updateStatus('Authentication error. Try again.', 'text-red-500');
+                }
+            }
+        }
+        
+        window.saveChanges = function() {
+            if (!isEditMode) return;
+            
+            // 1. Update the local PROFILE_DATA object from editable fields
+            PROFILE_DATA.name = document.getElementById('profile-name').textContent;
+            PROFILE_DATA.title = document.getElementById('profile-title').textContent;
+            PROFILE_DATA.bio = document.getElementById('bio-summary').textContent;
+            PROFILE_DATA.devPhilosophy = document.getElementById('dev-philosophy').textContent;
+            PROFILE_DATA.artisticVision = document.getElementById('artistic-vision').textContent;
+
+            // 2. Update array fields based on the CMS panel inputs
+            PROFILE_DATA.image_url = document.getElementById('edit-image-url').value;
+            PROFILE_DATA.skills = displayToArray(document.getElementById('edit-skills-input').value);
+            PROFILE_DATA.hobbies = displayToArray(document.getElementById('edit-hobbies-input').value);
+            PROFILE_DATA.art_gallery = displayToArray(document.getElementById('edit-gallery-input').value);
+            
+            // **Important Note on Education/Links:** To modify the Education or Links sections (e.g., adding a new link or school), you would need to implement more complex JSON editing controls. For now, focus on the fields provided in the CMS.
+
+            // 3. Save the updated object to the database
+            saveProfileData(PROFILE_DATA);
+
+            // 4. Re-render (onSnapshot handles this, but a quick manual render provides instant feedback)
+            renderProfile(PROFILE_DATA);
+        }
+
+    </script>
+
+    <!-- --- UI Elements --- -->
+
+    <!-- Edit Mode Toggle & Status Header -->
+    <header class="sticky top-0 z-20 w-full status-bar-bg backdrop-blur-md shadow-2xl p-4 flex flex-col sm:flex-row justify-between items-center border-b border-gray-700">
+        <div class="mb-2 sm:mb-0">
+            <span id="status-indicator" class="text-xs font-semibold text-yellow-400">Initializing...</span>
+        </div>
+        
+        <button id="edit-mode-toggle" 
+                onclick="toggleEditMode()"
+                class="px-5 py-2 text-sm font-semibold rounded-full bg-gray-600 text-white transition duration-300 hover:bg-gray-700 shadow-lg transform hover:scale-[1.02]">
+            Enable Edit Mode
+        </button>
+    </header>
+
+    <!-- 1. HERO SECTION -->
+    <section class="max-w-4xl mx-auto px-4 pt-10 pb-4">
+        <div class="card p-8 rounded-xl shadow-2xl flex flex-col md:flex-row items-center space-y-6 md:space-y-0 md:space-x-8">
+            <!-- Profile Image -->
+            <div class="flex-shrink-0 w-36 h-36 rounded-full overflow-hidden border-4 border-sky-400 shadow-lg ring-4 ring-slate-700/50">
+                <img id="profile-image" 
+                     src="" 
+                     alt="Profile Picture of Kushal Mahara" 
+                     class="w-full h-full object-cover transition duration-500 hover:opacity-80">
+            </div>
+            
+            <!-- Text Content -->
+            <div class="text-center md:text-left">
+                <h1 class="text-4xl md:text-5xl font-extrabold text-white leading-tight editable-text" contenteditable="false" id="profile-name"></h1>
+                <h2 class="text-xl accent-text font-light mt-1 editable-text" contenteditable="false" id="profile-title"></h2>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. TABBED NAVIGATION -->
+    <nav class="max-w-4xl mx-auto px-4 py-4 sticky top-[76px] z-10 status-bar-bg backdrop-blur-md border-b border-gray-700 shadow-lg">
+        <div class="flex flex-wrap gap-2 md:gap-4 justify-center">
+            <button id="tab-home-page" onclick="showPage('home-page')" class="nav-tab px-5 py-2 text-sm rounded-full transition duration-300">Home & Bio</button>
+            <button id="tab-skills-page" onclick="showPage('skills-page')" class="nav-tab px-5 py-2 text-sm rounded-full transition hover:bg-slate-700/50 text-gray-300">Skills & Education</button>
+            <button id="tab-portfolio-page" onclick="showPage('portfolio-page')" class="nav-tab px-5 py-2 text-sm rounded-full transition hover:bg-slate-700/50 text-gray-300">Art Portfolio</button>
+            <button id="tab-contact-page" onclick="showPage('contact-page')" class="nav-tab px-5 py-2 text-sm rounded-full transition hover:bg-slate-700/50 text-gray-300">Contact & Links</button>
+        </div>
+    </nav>
+    
+    <!-- 3. MAIN CONTENT CONTAINER (Tabbed Pages) -->
+    <main class="max-w-4xl mx-auto px-4 py-8 md:py-12" id="profile-container">
+
+        <!-- PAGE 1: HOME & BIO -->
+        <section id="home-page" class="content-page space-y-12">
+            
+            <!-- A. Personal Snapshot -->
+            <div class="card p-6 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Personal Snapshot</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-4 rounded-lg bg-slate-800/50 text-center col-span-2 md:col-span-1 border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">Age & Zodiac</p>
+                        <p id="stat-age" class="text-xl font-extrabold text-sky-300 mt-1"></p>
+                    </div>
+                    <div class="p-4 rounded-lg bg-slate-800/50 text-center col-span-2 md:col-span-1 border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">Location</p>
+                        <p id="stat-location" class="text-xl font-extrabold text-sky-300 mt-1"></p>
+                    </div>
+                    <div class="p-4 rounded-lg bg-slate-800/50 text-center col-span-2 md:col-span-1 border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">Date of Birth</p>
+                        <p id="stat-dob" class="text-xl font-extrabold text-sky-300 mt-1"></p>
+                    </div>
+                    <div class="p-4 rounded-lg bg-slate-800/50 text-center col-span-2 md:col-span-1 border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase tracking-widest">Birth Place</p>
+                        <p id="stat-birthplace" class="text-xl font-extrabold text-sky-300 mt-1"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- B. Comprehensive Bio -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Introduction & Ambitions</h3>
+                <p id="bio-summary" class="text-base text-gray-400 leading-relaxed editable-text" contenteditable="false"></p>
+            </div>
+            
+            <!-- C. Hobbies -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-4">Interests & Activities</h3>
+                <p class="text-gray-400 mb-4">Beyond academics and code, these activities keep me focused and balanced.</p>
+                <div id="hobbies-container" class="flex flex-wrap gap-3 pt-2">
+                    <!-- Hobbies rendered here by JS -->
+                </div>
+            </div>
+
+        </section>
+
+        <!-- PAGE 2: SKILLS & EDUCATION -->
+        <section id="skills-page" class="content-page hidden space-y-12">
+
+            <!-- A. Education Timeline -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Academic History</h3>
+                <div id="education-container" class="space-y-4">
+                    <!-- Education details rendered here by JS -->
+                </div>
+            </div>
+
+            <!-- B. Technical Skills -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-4">Technical & Core Skills</h3>
+                <p class="text-gray-400 mb-4">The languages and fields I am currently mastering, with a strong emphasis on foundational knowledge.</p>
+                <div id="skills-container" class="flex flex-wrap gap-3 pt-2">
+                    <!-- Skills rendered here by JS -->
+                </div>
+            </div>
+
+            <!-- C. Developer Philosophy -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Developer Philosophy</h3>
+                <p id="dev-philosophy" class="text-base text-gray-400 leading-relaxed editable-text" contenteditable="false"></p>
+            </div>
+        </section>
+
+        <!-- PAGE 3: ART PORTFOLIO -->
+        <section id="portfolio-page" class="content-page hidden space-y-12">
+            
+            <!-- A. Artistic Vision -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Artistic Vision</h3>
+                <p id="artistic-vision" class="text-base text-gray-400 leading-relaxed editable-text" contenteditable="false"></p>
+            </div>
+            
+            <!-- B. Art Gallery -->
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Visual Gallery (Multiple Photos)</h3>
+                <p class="text-gray-400 mb-6">A small selection of my recent pencil sketches and artistic endeavors.</p>
+                <div id="gallery-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                     <!-- Gallery images rendered here by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 4: CONTACT & LINKS -->
+        <section id="contact-page" class="content-page hidden space-y-12">
+            <div class="card p-8 rounded-xl shadow-lg">
+                <h3 class="text-2xl font-semibold text-white section-heading mb-6">Get in Touch</h3>
+                <p class="text-gray-400 mb-8">I am always open to collaborations, discussions on computer science, or just receiving feedback on my work.</p>
+                
+                <div id="contact-links" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Contact links rendered here by JS -->
+                </div>
+            </div>
+        </section>
+    
+    </main>
+
+    <!-- CMS EDIT PANEL (Hidden by Default) -->
+    <div id="cms-edit-panel" class="hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 p-4 border-t-4 border-sky-400 shadow-[0_-5px_20px_rgba(0,0,0,0.8)] overflow-y-auto max-h-[60vh] backdrop-blur-md">
+        <h5 class="text-xl font-extrabold accent-text mb-4 border-b border-slate-700 pb-2">Content Management System (CMS)</h5>
+        <p class="text-sm text-yellow-400 mb-4">Note: Simple text (Name, Bio, Philosophies) can be edited directly on the page when Edit Mode is active. Use these fields for structured data like lists and URLs.</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- Image URL Editor -->
+            <div class="md:col-span-1">
+                <label for="edit-image-url" class="block text-sm font-medium mb-1 text-gray-300">Profile Image URL</label>
+                <input id="edit-image-url" type="url" class="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:ring-sky-400 focus:border-sky-400" placeholder="Paste full image URL">
+            </div>
+
+            <!-- Array Editor (Skills) -->
+            <div class="md:col-span-1">
+                <label for="edit-skills-input" class="block text-sm font-medium mb-1 text-gray-300">Skills (Comma Separated)</label>
+                <input id="edit-skills-input" type="text" class="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:ring-sky-400 focus:border-sky-400" placeholder="e.g., Python, C++, HTML">
+            </div>
+
+            <!-- Array Editor (Hobbies) -->
+            <div class="md:col-span-1">
+                <label for="edit-hobbies-input" class="block text-sm font-medium mb-1 text-gray-300">Hobbies (Comma Separated)</label>
+                <input id="edit-hobbies-input" type="text" class="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:ring-sky-400 focus:border-sky-400" placeholder="e.g., Drawing, Chess, Video Games">
+            </div>
+            
+            <!-- Art Gallery Editor (Handles multiple photos) -->
+            <div class="md:col-span-3">
+                <label for="edit-gallery-input" class="block text-sm font-medium mb-1 text-gray-300">Art Gallery/Photo URLs (Comma Separated - max 5 recommended)</label>
+                <textarea id="edit-gallery-input" class="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:ring-sky-400 focus:border-sky-400" rows="3" placeholder="URL 1, URL 2, URL 3, URL 4, URL 5"></textarea>
+            </div>
+            
+        </div>
+        
+        <div class="mt-5 pt-4 border-t border-slate-700 flex justify-end items-center">
+            <button onclick="saveChanges()" class="px-8 py-3 text-sm font-bold rounded-full bg-sky-600 text-white transition duration-300 hover:bg-sky-700 shadow-xl transform hover:scale-[1.03]">
+                Save Changes Permanently
+            </button>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="text-center py-6 text-sm text-gray-500 border-t border-gray-700 mt-10">
+        &copy; 2024 Sangam Mahara (Kushal). Data powered by Firebase Firestore.
+    </footer>
+
+</body>
+</html>
